@@ -184,4 +184,202 @@ ERROR dataDecoder::append(uint8_t id_, uint8_t ord_, T *dataPtr_, uint8_t size_)
 template ERROR dataDecoder::append<bool>(uint8_t id_, uint8_t ord_, bool *dataPtr_, uint8_t size_);
 template ERROR dataDecoder::append<uint8_t>(uint8_t id_, uint8_t ord_, uint8_t *dataPtr_, uint8_t size_);
 template ERROR dataDecoder::append<uint16_t>(uint8_t id_, uint8_t ord_, uint16_t *dataPtr_, uint8_t size_);
-template ERROR dataDecoder::append<uint32_t>(uint8_t id_, uint32_t ord_, uint32_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<uint32_t>(uint8_t id_, uint8_t ord_, uint32_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<uint64_t>(uint8_t id_, uint8_t ord_, uint64_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<int8_t>(uint8_t id_, uint8_t ord_, int8_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<int16_t>(uint8_t id_, uint8_t ord_, int16_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<int32_t>(uint8_t id_, uint8_t ord_, int32_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<int64_t>(uint8_t id_, uint8_t ord_, int64_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<float>(uint8_t id_, uint8_t ord_, float *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<double>(uint8_t id_, uint8_t ord_, double *dataPtr_, uint8_t size_);
+
+ERROR dataDecoder::set() {
+  for (uint8_t i = 0; i < MAX_PORT_NUM; i++) {
+    _dataSet[i].bitLength = 0;
+    for (uint8_t j = 0; j < MAX_DATA_NUM; j++) if (_dataSet[i].info[j].isActive) _dataSet[i].bitLength += _dataSet[i].info[j].size.encoded;
+    if (_dataSet[i].bitLength > DATA_LENGTH_LIMIT) return ERROR::OVERFLOW;
+    _dataSet[i].isEditable = false;
+  }
+  return ERROR::OK;
+}
+
+ERROR dataDecoder::appendToBuffer(uint8_t data) {
+  if (_bufferIndex >= BUFFER_SIZE) return ERROR::OVERFLOW;
+  _buffer[_bufferIndex++] = data;
+  return ERROR::OK;
+}
+
+ERROR dataDecoder::decode() {
+  ERROR error;
+  error = _extractData();
+  if (error != ERROR::OK) return error;
+  error = _generateBinary();
+  if (error != ERROR::OK) return error;
+  error = _getEncodedData(_dataPacket.id);
+  if (error != ERROR::OK) return error;
+  error = _getBitsData(_dataPacket.id);
+  if (error != ERROR::OK) return error;
+  error = _restoreData(_dataPacket.id);
+  if (error != ERROR::OK) return error;
+  return ERROR::OK;
+}
+
+uint8_t dataDecoder::getCurrentId() {
+  uint8_t id = _currentId;
+  _currentId = 255;
+  return id;
+}
+
+void dataDecoder::_shiftLeftBuffer(uint16_t step_) {
+  for (uint16_t i = 0; i < BUFFER_SIZE; i++) {
+      if ((i + step_) < BUFFER_SIZE) _buffer[i] = _buffer[i + step_];
+      else _buffer[i] = 0;
+  }
+  if (_bufferIndex >= step_) _bufferIndex -= step_;
+  else _bufferIndex = 0;
+}
+
+ERROR dataDecoder::_extractData() {
+  for (uint8_t i = 0; i < MAX_BYTE; i++) _dataPacket.data[i] = 0;
+
+  if (_bufferIndex == 0) return ERROR::NO_DATA;
+
+  if ((_buffer[0] & 0b11000000) != 0b10000000) {
+    uint16_t idx = 1;
+
+    while (idx < _bufferIndex && ((_buffer[idx] & 0b11000000) != 0b10000000)) {
+      idx++;
+    }
+
+    if (idx >= _bufferIndex) {
+      _shiftLeftBuffer(_bufferIndex);
+      return ERROR::NO_DATA;
+    }
+
+    _shiftLeftBuffer(idx);
+    return ERROR::INVALID_HEADER;
+  }
+
+  uint8_t len = 0;
+
+  while (true) {
+    if ((len + 3) >= _bufferIndex) return ERROR::INCOMPLETE_PACKET;
+
+    if ((_buffer[len + 3] & 0b11000000) == 0b11000000) break;
+
+    len++;
+
+    if (len > DATA_LENGTH_LIMIT) return ERROR::INCOMPLETE_PACKET;
+  }
+
+  if ((len % 64) != (_buffer[len + 3] & 0b00111111)) {
+    _shiftLeftBuffer(len + 3);
+    return ERROR::INVALID_LENGTH;
+  }
+
+  uint32_t checkSum_calc = 0;
+  for (uint8_t i = 0; i < len; i++) checkSum_calc += _buffer[i + 1];
+
+  uint32_t checkSum_recv = ((uint16_t)(_buffer[len + 1] & 0b01111111) << 7) | (_buffer[len + 2] & 0b01111111);
+
+  if (checkSum_calc != checkSum_recv) {
+    _shiftLeftBuffer(1);
+    return ERROR::INVALID_CHECKSUM;
+  }
+
+  _dataPacket.id = _buffer[0] & 0b00111111;
+  _dataPacket.length = len;
+
+  for (uint8_t i = 0; i < len; i++) _dataPacket.data[i] = _buffer[i + 1];
+
+  _shiftLeftBuffer(len + 4);
+  _currentId = _dataPacket.id;
+
+  return ERROR::OK;
+}
+
+ERROR dataDecoder::_generateBinary() {
+  if (_dataSet[_dataPacket.id].isEditable) return ERROR::UNSET_PACKET;
+  for (uint16_t i = 0; i < MAX_BIT; i++) _binary[i] = 0;
+  for (uint8_t i = 0; i < _dataPacket.length; i++) {
+    for (uint8_t j = 0; j < 7; j++) _binary[i * 7 + j] = ((_dataPacket.data[i] >> (6 - j)) & 0x01);
+  }
+  return ERROR::OK;
+}
+
+ERROR dataDecoder::_getEncodedData(uint8_t id_) {
+  uint16_t idx = 0;
+  for (uint8_t i = 0; i < MAX_DATA_NUM; i++) {
+    if (!_dataSet[id_].info[i].isActive) continue;
+    _dataSet[id_].info[i].data.encoded = 0;
+    for (uint8_t j = 0; j < _dataSet[id_].info[i].size.encoded; j++) {
+      _dataSet[id_].info[i].data.encoded |= (_binary[idx] << (_dataSet[id_].info[i].size.encoded - 1 - j));
+      idx++;
+    }
+  }
+  return ERROR::OK;
+}
+
+ERROR dataDecoder::_getBitsData(uint8_t id_) {
+  for (uint8_t i = 0; i < MAX_DATA_NUM; i++) {
+    if (_dataSet[id_].info[i].type == TYPE::INT) {
+      bool signBit = (bool)(_dataSet[id_].info[i].data.encoded >> (_dataSet[id_].info[i].size.encoded - 1) & 0x00000001);
+      uint32_t mask = 0;
+      for (uint8_t j = _dataSet[id_].info[i].size.encoded; j < 32; j++) mask |= (signBit << j);
+      _dataSet[id_].info[i].data.bits = mask | _dataSet[id_].info[i].data.encoded;
+    }
+    else _dataSet[id_].info[i].data.bits = _dataSet[id_].info[i].data.encoded;
+  }
+  return ERROR::OK;
+}
+
+ERROR dataDecoder::_restoreData(uint8_t id_) {
+  for (uint8_t i = 0; i < MAX_DATA_NUM; i++) {
+    if (!_dataSet[id_].info[i].isActive) continue;
+    switch (_dataSet[id_].info[i].type) {
+      case (TYPE::BOOL): {
+        uint32_t temp = static_cast<uint32_t>(_dataSet[id_].info[i].data.bits);
+        *static_cast<bool*>(_dataSet[id_].info[i].ptr) = static_cast<bool>(temp);
+        break;
+      }
+      case (TYPE::UINT): {
+        uint32_t temp = static_cast<uint32_t>(_dataSet[id_].info[i].data.bits);
+        switch (_dataSet[id_].info[i].size.raw) {
+          case 8: *static_cast<uint8_t*>(_dataSet[id_].info[i].ptr) = static_cast<uint8_t>(temp); break;
+          case 16: *static_cast<uint16_t*>(_dataSet[id_].info[i].ptr) = static_cast<uint16_t>(temp); break;
+          case 32: *static_cast<uint32_t*>(_dataSet[id_].info[i].ptr) = static_cast<uint32_t>(temp); break;
+          case 64: *static_cast<uint64_t*>(_dataSet[id_].info[i].ptr) = static_cast<uint64_t>(temp); break;
+          default: return ERROR::INVALID_SIZE; break;
+        }
+        break;
+      }
+      case (TYPE::INT): {
+        uint32_t temp = static_cast<uint32_t>(_dataSet[id_].info[i].data.bits);
+        int32_t temps;
+        memcpy(&temps, &temp, sizeof(temps));
+        switch (_dataSet[id_].info[i].size.raw) {
+          case 8: *static_cast<int8_t*>(_dataSet[id_].info[i].ptr) = static_cast<int8_t>(temps); break;
+          case 16: *static_cast<int16_t*>(_dataSet[id_].info[i].ptr) = static_cast<int16_t>(temps); break;
+          case 32: *static_cast<int32_t*>(_dataSet[id_].info[i].ptr) = static_cast<int32_t>(temps); break;
+          case 64: *static_cast<int64_t*>(_dataSet[id_].info[i].ptr) = static_cast<int64_t>(temps); break;
+          default: return ERROR::INVALID_SIZE; break;
+        }
+        break;
+      }
+      case (TYPE::FLOAT): {
+        uint32_t temp = static_cast<uint32_t>(_dataSet[id_].info[i].data.bits);
+        float tempf;
+        memcpy(&tempf, &temp, sizeof(tempf));
+        switch (_dataSet[id_].info[i].size.raw) {
+          case 32: *static_cast<float*>(_dataSet[id_].info[i].ptr) = static_cast<float>(tempf); break;
+          case 64: *static_cast<double*>(_dataSet[id_].info[i].ptr) = static_cast<double>(tempf); break;
+          default: return ERROR::INVALID_SIZE; break;
+        }
+        break;
+      }
+      default: return ERROR::INVALID_TYPE; break;
+    }
+  }
+  return ERROR::OK;
+}
+#endif
