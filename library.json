@@ -1,0 +1,25 @@
+{
+  "name": "dataCodec",
+  "version": "0.0.0",
+  "description": "Library for encoding and decoding data for communication.",
+  "keywords": [
+    "communication",
+    "serial",
+    "encoding",
+    "decoding",
+    "packet"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KARURA-project/dataCodec.git"
+  },
+  "authors": [
+    {
+      "name": "Kio (Kanata Hagiwara)",
+      "email": "domka.mechanic@gmail.com"
+    }
+  ],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "*"
+}
