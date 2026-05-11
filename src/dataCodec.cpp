@@ -157,49 +157,45 @@ void dataEncoder::_generateBinary() {
 #endif
 
 #ifndef DATA_ENCODER_ONLY
-dataDecoder::dataDecoder() {
-  for (uint8_t i = 0; i < MAX_PORT_NUM; i++) {
-    _dataSet[i].isEditable = true;
-    _dataSet[i].id = i;
-  }
+dataDecoder::dataDecoder(uint8_t id_) {
+  _dataSet.isEditable = true;
+  _dataSet.id = id_;
   _bufferIndex = 0;
   _currentId = 255;
   for (uint16_t i = 0; i < BUFFER_SIZE; i++) _buffer[i] = 0;
 }
 
 template <typename T>
-ERROR dataDecoder::append(uint8_t id_, uint8_t ord_, T *dataPtr_, uint8_t size_) {
-  if (!_dataSet[id_].isEditable) return ERROR::UNEDITABLE;
+ERROR dataDecoder::append(uint8_t ord_, T *dataPtr_, uint8_t size_) {
+  if (!_dataSet.isEditable) return ERROR::UNEDITABLE;
   if (MAX_DATA_NUM <= ord_) return ERROR::INVALID_PARAM;
-  if (_dataSet[id_].info[ord_].isActive) return ERROR::INVALID_PARAM;
+  if (_dataSet.info[ord_].isActive) return ERROR::INVALID_PARAM;
   if (dataPtr_ == nullptr) return ERROR::INVALID_PARAM;
   if ((size_ == 0) || (32 < size_)) return ERROR::INVALID_PARAM;
-  _dataSet[id_].info[ord_].isActive = true;
-  _dataSet[id_].info[ord_].ptr = static_cast<void*>(dataPtr_);
-  _dataSet[id_].info[ord_].type = _identifyType<T>();
-  _dataSet[id_].info[ord_].size.raw = sizeof(T) * 8;
-  _dataSet[id_].info[ord_].size.encoded = _decideSize<T>(_dataSet[id_].info[ord_].type, size_);
+  _dataSet.info[ord_].isActive = true;
+  _dataSet.info[ord_].ptr = static_cast<void*>(dataPtr_);
+  _dataSet.info[ord_].type = _identifyType<T>();
+  _dataSet.info[ord_].size.raw = sizeof(T) * 8;
+  _dataSet.info[ord_].size.encoded = _decideSize<T>(_dataSet.info[ord_].type, size_);
   return ERROR::OK;
 }
-template ERROR dataDecoder::append<bool>(uint8_t id_, uint8_t ord_, bool *dataPtr_, uint8_t size_);
-template ERROR dataDecoder::append<uint8_t>(uint8_t id_, uint8_t ord_, uint8_t *dataPtr_, uint8_t size_);
-template ERROR dataDecoder::append<uint16_t>(uint8_t id_, uint8_t ord_, uint16_t *dataPtr_, uint8_t size_);
-template ERROR dataDecoder::append<uint32_t>(uint8_t id_, uint8_t ord_, uint32_t *dataPtr_, uint8_t size_);
-template ERROR dataDecoder::append<uint64_t>(uint8_t id_, uint8_t ord_, uint64_t *dataPtr_, uint8_t size_);
-template ERROR dataDecoder::append<int8_t>(uint8_t id_, uint8_t ord_, int8_t *dataPtr_, uint8_t size_);
-template ERROR dataDecoder::append<int16_t>(uint8_t id_, uint8_t ord_, int16_t *dataPtr_, uint8_t size_);
-template ERROR dataDecoder::append<int32_t>(uint8_t id_, uint8_t ord_, int32_t *dataPtr_, uint8_t size_);
-template ERROR dataDecoder::append<int64_t>(uint8_t id_, uint8_t ord_, int64_t *dataPtr_, uint8_t size_);
-template ERROR dataDecoder::append<float>(uint8_t id_, uint8_t ord_, float *dataPtr_, uint8_t size_);
-template ERROR dataDecoder::append<double>(uint8_t id_, uint8_t ord_, double *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<bool>(uint8_t ord_, bool *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<uint8_t>(uint8_t ord_, uint8_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<uint16_t>(uint8_t ord_, uint16_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<uint32_t>(uint8_t ord_, uint32_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<uint64_t>(uint8_t ord_, uint64_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<int8_t>(uint8_t ord_, int8_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<int16_t>(uint8_t ord_, int16_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<int32_t>(uint8_t ord_, int32_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<int64_t>(uint8_t ord_, int64_t *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<float>(uint8_t ord_, float *dataPtr_, uint8_t size_);
+template ERROR dataDecoder::append<double>(uint8_t ord_, double *dataPtr_, uint8_t size_);
 
 ERROR dataDecoder::set() {
-  for (uint8_t i = 0; i < MAX_PORT_NUM; i++) {
-    _dataSet[i].bitLength = 0;
-    for (uint8_t j = 0; j < MAX_DATA_NUM; j++) if (_dataSet[i].info[j].isActive) _dataSet[i].bitLength += _dataSet[i].info[j].size.encoded;
-    if (_dataSet[i].bitLength > DATA_LENGTH_LIMIT) return ERROR::OVERFLOW;
-    _dataSet[i].isEditable = false;
-  }
+  _dataSet.bitLength = 0;
+  for (uint8_t j = 0; j < MAX_DATA_NUM; j++) if (_dataSet.info[j].isActive) _dataSet.bitLength += _dataSet.info[j].size.encoded;
+  if (_dataSet.bitLength > DATA_LENGTH_LIMIT) return ERROR::OVERFLOW;
+  _dataSet.isEditable = false;
   return ERROR::OK;
 }
 
@@ -213,13 +209,14 @@ ERROR dataDecoder::decode() {
   ERROR error;
   error = _extractData();
   if (error != ERROR::OK) return error;
+  if (_dataPacket.id != _dataSet.id) return ERROR::INVALID_PARAM;
   error = _generateBinary();
   if (error != ERROR::OK) return error;
-  error = _getEncodedData(_dataPacket.id);
+  error = _getEncodedData();
   if (error != ERROR::OK) return error;
-  error = _getBitsData(_dataPacket.id);
+  error = _getBitsData();
   if (error != ERROR::OK) return error;
-  error = _restoreData(_dataPacket.id);
+  error = _restoreData();
   if (error != ERROR::OK) return error;
   return ERROR::OK;
 }
@@ -299,7 +296,7 @@ ERROR dataDecoder::_extractData() {
 }
 
 ERROR dataDecoder::_generateBinary() {
-  if (_dataSet[_dataPacket.id].isEditable) return ERROR::UNSET_PACKET;
+  if (_dataSet.isEditable) return ERROR::UNSET_PACKET;
   for (uint16_t i = 0; i < MAX_BIT; i++) _binary[i] = 0;
   for (uint8_t i = 0; i < _dataPacket.length; i++) {
     for (uint8_t j = 0; j < 7; j++) _binary[i * 7 + j] = ((_dataPacket.data[i] >> (6 - j)) & 0x01);
@@ -307,72 +304,73 @@ ERROR dataDecoder::_generateBinary() {
   return ERROR::OK;
 }
 
-ERROR dataDecoder::_getEncodedData(uint8_t id_) {
+ERROR dataDecoder::_getEncodedData() {
   uint16_t idx = 0;
   for (uint8_t i = 0; i < MAX_DATA_NUM; i++) {
-    if (!_dataSet[id_].info[i].isActive) continue;
-    _dataSet[id_].info[i].data.encoded = 0;
-    for (uint8_t j = 0; j < _dataSet[id_].info[i].size.encoded; j++) {
-      _dataSet[id_].info[i].data.encoded |= (_binary[idx] << (_dataSet[id_].info[i].size.encoded - 1 - j));
+    if (!_dataSet.info[i].isActive) continue;
+    _dataSet.info[i].data.encoded = 0;
+    for (uint8_t j = 0; j < _dataSet.info[i].size.encoded; j++) {
+      _dataSet.info[i].data.encoded |= (_binary[idx] << (_dataSet.info[i].size.encoded - 1 - j));
       idx++;
     }
   }
   return ERROR::OK;
 }
 
-ERROR dataDecoder::_getBitsData(uint8_t id_) {
+ERROR dataDecoder::_getBitsData() {
   for (uint8_t i = 0; i < MAX_DATA_NUM; i++) {
-    if (_dataSet[id_].info[i].type == TYPE::INT) {
-      bool signBit = (bool)(_dataSet[id_].info[i].data.encoded >> (_dataSet[id_].info[i].size.encoded - 1) & 0x00000001);
+    if (_dataSet.info[i].type == TYPE::INT) {
+      bool signBit = (bool)(_dataSet.info[i].data.encoded >> (_dataSet.info[i].size.encoded - 1) & 0x00000001);
       uint32_t mask = 0;
-      for (uint8_t j = _dataSet[id_].info[i].size.encoded; j < 32; j++) mask |= (signBit << j);
-      _dataSet[id_].info[i].data.bits = mask | _dataSet[id_].info[i].data.encoded;
+      for (uint8_t j = _dataSet.info[i].size.encoded; j < 32; j++) mask |= (signBit << j);
+      _dataSet.info[i].data.bits = mask | _dataSet.info[i].data.encoded;
     }
-    else _dataSet[id_].info[i].data.bits = _dataSet[id_].info[i].data.encoded;
+    else _dataSet.info[i].data.bits = _dataSet.info[i].data.encoded;
   }
   return ERROR::OK;
 }
 
-ERROR dataDecoder::_restoreData(uint8_t id_) {
+ERROR dataDecoder::_restoreData() {
+  dataSet_t &ds = _dataSet;
   for (uint8_t i = 0; i < MAX_DATA_NUM; i++) {
-    if (!_dataSet[id_].info[i].isActive) continue;
-    switch (_dataSet[id_].info[i].type) {
+    if (!ds.info[i].isActive) continue;
+    switch (ds.info[i].type) {
       case (TYPE::BOOL): {
-        uint32_t temp = static_cast<uint32_t>(_dataSet[id_].info[i].data.bits);
-        *static_cast<bool*>(_dataSet[id_].info[i].ptr) = static_cast<bool>(temp);
+        uint32_t temp = static_cast<uint32_t>(ds.info[i].data.bits);
+        *static_cast<bool*>(ds.info[i].ptr) = static_cast<bool>(temp);
         break;
       }
       case (TYPE::UINT): {
-        uint32_t temp = static_cast<uint32_t>(_dataSet[id_].info[i].data.bits);
-        switch (_dataSet[id_].info[i].size.raw) {
-          case 8: *static_cast<uint8_t*>(_dataSet[id_].info[i].ptr) = static_cast<uint8_t>(temp); break;
-          case 16: *static_cast<uint16_t*>(_dataSet[id_].info[i].ptr) = static_cast<uint16_t>(temp); break;
-          case 32: *static_cast<uint32_t*>(_dataSet[id_].info[i].ptr) = static_cast<uint32_t>(temp); break;
-          case 64: *static_cast<uint64_t*>(_dataSet[id_].info[i].ptr) = static_cast<uint64_t>(temp); break;
+        uint32_t temp = static_cast<uint32_t>(ds.info[i].data.bits);
+        switch (ds.info[i].size.raw) {
+          case 8: *static_cast<uint8_t*>(ds.info[i].ptr) = static_cast<uint8_t>(temp); break;
+          case 16: *static_cast<uint16_t*>(ds.info[i].ptr) = static_cast<uint16_t>(temp); break;
+          case 32: *static_cast<uint32_t*>(ds.info[i].ptr) = static_cast<uint32_t>(temp); break;
+          case 64: *static_cast<uint64_t*>(ds.info[i].ptr) = static_cast<uint64_t>(temp); break;
           default: return ERROR::INVALID_SIZE; break;
         }
         break;
       }
       case (TYPE::INT): {
-        uint32_t temp = static_cast<uint32_t>(_dataSet[id_].info[i].data.bits);
+        uint32_t temp = static_cast<uint32_t>(ds.info[i].data.bits);
         int32_t temps;
         memcpy(&temps, &temp, sizeof(temps));
-        switch (_dataSet[id_].info[i].size.raw) {
-          case 8: *static_cast<int8_t*>(_dataSet[id_].info[i].ptr) = static_cast<int8_t>(temps); break;
-          case 16: *static_cast<int16_t*>(_dataSet[id_].info[i].ptr) = static_cast<int16_t>(temps); break;
-          case 32: *static_cast<int32_t*>(_dataSet[id_].info[i].ptr) = static_cast<int32_t>(temps); break;
-          case 64: *static_cast<int64_t*>(_dataSet[id_].info[i].ptr) = static_cast<int64_t>(temps); break;
+        switch (ds.info[i].size.raw) {
+          case 8: *static_cast<int8_t*>(ds.info[i].ptr) = static_cast<int8_t>(temps); break;
+          case 16: *static_cast<int16_t*>(ds.info[i].ptr) = static_cast<int16_t>(temps); break;
+          case 32: *static_cast<int32_t*>(ds.info[i].ptr) = static_cast<int32_t>(temps); break;
+          case 64: *static_cast<int64_t*>(ds.info[i].ptr) = static_cast<int64_t>(temps); break;
           default: return ERROR::INVALID_SIZE; break;
         }
         break;
       }
       case (TYPE::FLOAT): {
-        uint32_t temp = static_cast<uint32_t>(_dataSet[id_].info[i].data.bits);
+        uint32_t temp = static_cast<uint32_t>(ds.info[i].data.bits);
         float tempf;
         memcpy(&tempf, &temp, sizeof(tempf));
-        switch (_dataSet[id_].info[i].size.raw) {
-          case 32: *static_cast<float*>(_dataSet[id_].info[i].ptr) = static_cast<float>(tempf); break;
-          case 64: *static_cast<double*>(_dataSet[id_].info[i].ptr) = static_cast<double>(tempf); break;
+        switch (ds.info[i].size.raw) {
+          case 32: *static_cast<float*>(ds.info[i].ptr) = static_cast<float>(tempf); break;
+          case 64: *static_cast<double*>(ds.info[i].ptr) = static_cast<double>(tempf); break;
           default: return ERROR::INVALID_SIZE; break;
         }
         break;

@@ -7,7 +7,7 @@
 // Note: if the serial line is connected directly to the encoder, serial
 // printing is not useful and should be avoided.
 
-dataDecoder dec;
+dataDecoder dec(0);
 
 struct Data {
   bool a;
@@ -36,18 +36,18 @@ void loop() {
 }
 
 void initDec() {
-  // Register the expected packet layout for port ID 0.
+  // Register the expected packet layout for packet ID 0.
   // The field order must match the encoder packet definition.
-  dec.append<bool>(0, 0, &decData.a);
+  dec.append<bool>(0, &decData.a);
 
   // Use only 2 bits for this unsigned field. Valid decoded values are 0..3.
-  dec.append<uint8_t>(0, 1, &decData.b, 2);
+  dec.append<uint8_t>(1, &decData.b, 2);
 
   // Use 10 bits for this signed integer field.
-  dec.append<int16_t>(0, 2, &decData.c, 10);
+  dec.append<int16_t>(2, &decData.c, 10);
 
   // Float values are decoded as 32-bit float in this library.
-  dec.append<float>(0, 3, &decData.d);
+  dec.append<float>(3, &decData.d);
 
   // Finalize the decoder layout before processing packets.
   dec.set();

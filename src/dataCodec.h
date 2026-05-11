@@ -93,15 +93,15 @@ private:
 #ifndef DATA_ENCODER_ONLY
 class dataDecoder : public dataCodecBase {
 public:
-  dataDecoder();
+  dataDecoder(uint8_t id_ = 0);
   template <typename T>
-  ERROR append(uint8_t id_, uint8_t ord_, T *dataPtr_, uint8_t size_ = 32);
+  ERROR append(uint8_t ord_, T *dataPtr_, uint8_t size_ = 32);
   ERROR set();
   ERROR appendToBuffer(uint8_t data);
   ERROR decode();
   uint8_t getCurrentId();
 private:
-  dataSet_t _dataSet[MAX_PORT_NUM] = {};
+  dataSet_t _dataSet = {};
   dataPacket_t _dataPacket = {};  
   uint8_t _buffer[BUFFER_SIZE] = {};
   uint16_t _bufferIndex; 
@@ -110,9 +110,9 @@ private:
   void _shiftLeftBuffer(uint16_t step_);
   ERROR _extractData();
   ERROR _generateBinary();
-  ERROR _getEncodedData(uint8_t id_);
-  ERROR _getBitsData(uint8_t id_);
-  ERROR _restoreData(uint8_t id_);
+  ERROR _getEncodedData();
+  ERROR _getBitsData();
+  ERROR _restoreData();
 };
 #endif
 

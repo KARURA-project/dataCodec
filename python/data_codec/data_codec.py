@@ -1,8 +1,8 @@
 # data_codec.py
-# C++ dataCodec 準拠版（マルチポート dataDecoder 実装）
+# C++ dataCodec 準拠版
 #
-# - dataEncoder: 1インスタンス = 1ポート（id）
-# - dataDecoder: 1インスタンスで id=0..MAX_PORT_NUM-1 をまとめてデコード
+# - dataEncoder: 1インスタンス = 1パケットID（id）
+# - dataDecoder: 1インスタンス = 1固定パケットID
 # - プロトコル:
 #   header: 10iiiiii (i = id)
 #   payload: 7bit pack (MSB→LSB, data[1] の bit6 から)
@@ -16,7 +16,6 @@ import struct
 MAX_DATA_NUM = 10
 MAX_BIT = MAX_DATA_NUM * 32
 MAX_BYTE = (MAX_BIT + 6) // 7 + 4
-MAX_PORT_NUM = 10
 BUFFER_SIZE = 4096
 # ★DATA_LENGTH_LIMIT は「payload の最大バイト数」
 DATA_LENGTH_LIMIT = 127
@@ -216,12 +215,11 @@ class DataEncoder(DataCodecBaseEnc):
 # ---------- Decoder (C++ dataDecoder 相当：マルチポート) ----------
 
 class DataDecoder:
-    def __init__(self):
-        # ポートごとに DataSet を持つ
-        self._data_sets = [_DataSet() for _ in range(MAX_PORT_NUM)]
-        for pid, ds in enumerate(self._data_sets):
-            ds.id = pid
-            ds.is_editable = True
+    def __init__(self, id_: int = 0):
+        # Single fixed packet ID decoder.
+        self._data_set = _DataSet()
+        self._data_set.id = id_
+        self._data_set.is_editable = True
 
         self._packet = DataPacket()             # 直近のフレーム（header〜tail 含む）
         self._buffer = bytearray(BUFFER_SIZE)   # 受信バッファ
@@ -235,16 +233,14 @@ class DataDecoder:
         if tp == TYPE.FLOAT: return 32
         return 0
 
-    def append(self, id_: int, ord_: int, ptr: List[Any], tp: TYPE, bits: Optional[int]=None) -> ERROR:
-        """C++: append(id, ord, &var, size) に相当"""
-        if not (0 <= id_ < MAX_PORT_NUM):
-            return ERROR.INVALID_PARAM
+    def append(self, ord_: int, ptr: List[Any], tp: TYPE, bits: Optional[int]=None) -> ERROR:
+        """Register a field for the fixed decoder ID."""
         if not (0 <= ord_ < MAX_DATA_NUM):
             return ERROR.INVALID_PARAM
         if not (isinstance(ptr, list) and len(ptr) == 1):
             return ERROR.INVALID_PARAM
 
-        ds = self._data_sets[id_]
+        ds = self._data_set
         if not ds.is_editable:
             return ERROR.UNEDITABLE
         info = ds.info[ord_]
@@ -269,25 +265,29 @@ class DataDecoder:
         return ERROR.OK
 
     def set(self) -> ERROR:
-        """全ポートの bit_length / payload_len を確定させる（byte 上限でチェック）"""
-        for ds in self._data_sets:
-            ds.bit_length = 0
-            for i in range(MAX_DATA_NUM):
-                if ds.info[i].is_active:
-                    ds.bit_length += ds.info[i].size["encoded"]
+        """Finalize the single decoder layout and validate payload size."""
+        ds = self._data_set
+        ds.bit_length = 0
+        for i in range(MAX_DATA_NUM):
+            if ds.info[i].is_active:
+                ds.bit_length += ds.info[i].size["encoded"]
 
-            if ds.bit_length == 0:
-                ds.payload_len = 0
-                ds.is_editable = False
-                continue
-
-            payload_len = (ds.bit_length + 6) // 7
-            if payload_len > DATA_LENGTH_LIMIT:
-                return ERROR.OVERFLOW
-
-            ds.payload_len = payload_len
+        if ds.bit_length == 0:
+            ds.payload_len = 0
             ds.is_editable = False
+            return ERROR.OK
+
+        payload_len = (ds.bit_length + 6) // 7
+        if payload_len > DATA_LENGTH_LIMIT:
+            return ERROR.OVERFLOW
+
+        ds.payload_len = payload_len
+        ds.is_editable = False
         return ERROR.OK
+
+    def get_current_id(self) -> int:
+        """Return the last decoded packet ID."""
+        return self._packet.id
 
     def append_to_buffer(self, b: int) -> ERROR:
         """Serial.read() 等で受けた1バイトを溜める"""
@@ -371,9 +371,9 @@ class DataDecoder:
         self._shift_left(frame_len)
         return ERROR.OK
 
-    def _payload_bit_unpack(self, pid: int):
+    def _payload_bit_unpack(self):
         """payload 部を bit 列に戻す（_binary に格納）"""
-        ds = self._data_sets[pid]
+        ds = self._data_set
         idx = 0
         for i in range(ds.bit_length):
             bindex = 1 + (i // 7)       # header の次から payload
@@ -382,9 +382,9 @@ class DataDecoder:
             self._binary[idx] = bit
             idx += 1
 
-    def _collect_encoded_words(self, pid: int):
+    def _collect_encoded_words(self):
         """_binary から各データの encoded 値を復元"""
-        ds = self._data_sets[pid]
+        ds = self._data_set
         idx = 0
         for i in range(MAX_DATA_NUM):
             inf = ds.info[i]
@@ -397,9 +397,9 @@ class DataDecoder:
                 idx += 1
             inf.data["encoded"] = acc
 
-    def _get_bits_data(self, pid: int) -> ERROR:
+    def _get_bits_data(self) -> ERROR:
         """INT 用に符号拡張して bits を作る"""
-        ds = self._data_sets[pid]
+        ds = self._data_set
         for i in range(MAX_DATA_NUM):
             inf = ds.info[i]
             if not inf.is_active:
@@ -426,9 +426,9 @@ class DataDecoder:
                 inf.data["bits"] = enc
         return ERROR.OK
 
-    def _restore_values(self, pid: int) -> ERROR:
+    def _restore_values(self) -> ERROR:
         """実際の変数に値を書き戻す"""
-        ds = self._data_sets[pid]
+        ds = self._data_set
         for i in range(MAX_DATA_NUM):
             inf = ds.info[i]
             if not inf.is_active:
@@ -482,18 +482,17 @@ class DataDecoder:
         if err != ERROR.OK:
             return err
 
-        pid = self._packet.id
-        if not (0 <= pid < MAX_PORT_NUM):
+        if self._packet.id != self._data_set.id:
             return ERROR.INVALID_PARAM
 
-        ds = self._data_sets[pid]
+        ds = self._data_set
         if ds.is_editable or ds.bit_length == 0:
             return ERROR.UNSET_PACKET
 
-        self._payload_bit_unpack(pid)
-        self._collect_encoded_words(pid)
-        err = self._get_bits_data(pid)
+        self._payload_bit_unpack()
+        self._collect_encoded_words()
+        err = self._get_bits_data()
         if err != ERROR.OK:
             return err
-        err = self._restore_values(pid)
+        err = self._restore_values()
         return err

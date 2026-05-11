@@ -27,11 +27,11 @@ dec_data = {
 
 
 def init_decoder() -> DataDecoder:
-    dec = DataDecoder()
-    dec.append(0, 0, dec_data['a'], TYPE.BOOL)
-    dec.append(0, 1, dec_data['b'], TYPE.UINT, bits=2)
-    dec.append(0, 2, dec_data['c'], TYPE.INT, bits=10)
-    dec.append(0, 3, dec_data['d'], TYPE.FLOAT)
+    dec = DataDecoder(id_=0)
+    dec.append(0, dec_data['a'], TYPE.BOOL)
+    dec.append(1, dec_data['b'], TYPE.UINT, bits=2)
+    dec.append(2, dec_data['c'], TYPE.INT, bits=10)
+    dec.append(3, dec_data['d'], TYPE.FLOAT)
     result = dec.set()
     if result != ERROR.OK:
         raise RuntimeError(f'Decoder set() failed: {result}')
@@ -42,8 +42,7 @@ def init_decoder() -> DataDecoder:
 def try_decode(dec: DataDecoder):
     error = dec.decode()
     if error == ERROR.OK:
-        # Use the internal packet object to get the last decoded packet ID.
-        packet_id = dec._packet.id
+        packet_id = dec.get_current_id()
         print(f'Decoded packet id={packet_id}')
         print(f' a = {dec_data["a"][0]}')
         print(f' b = {dec_data["b"][0]}')
